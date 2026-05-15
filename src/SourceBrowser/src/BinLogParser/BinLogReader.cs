@@ -4,6 +4,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace Microsoft.SourceBrowser.BinLogParser
 {
@@ -46,12 +47,14 @@ namespace Microsoft.SourceBrowser.BinLogParser
         private static List<CompilerInvocation> ExtractInvocationsFromBuild(string logFilePath)
         {
             var build = Microsoft.Build.Logging.StructuredLogger.Serialization.Read(logFilePath);
+            var solutionRoot = Path.GetDirectoryName(logFilePath);
             var invocations = new List<CompilerInvocation>();
             build.VisitAllChildren<Microsoft.Build.Logging.StructuredLogger.Task>(t =>
             {
                 var invocation = TryGetInvocationFromTask(t, build);
                 if (invocation != null)
                 {
+                    invocation.SolutionRoot = solutionRoot;
                     invocations.Add(invocation);
                 }
             });
@@ -76,17 +79,27 @@ namespace Microsoft.SourceBrowser.BinLogParser
             // Get the project once and reuse it
             var project = task.GetNearestParent<Microsoft.Build.Logging.StructuredLogger.Project>();
             
+            var properties = project?.GetEvaluation(build)?.GetProperties() ?? new Dictionary<string, string>();
+
+            string outputAssemblyPath = null;
+            if (properties.TryGetValue("TargetPath", out var targetPath))
+            {
+                outputAssemblyPath = targetPath;
+            }
+
             var invocation = new CompilerInvocation
             {
                 Language = language,
                 CommandLineArguments = commandLine,
                 ProjectFilePath = project?.ProjectFile,
-                ProjectProperties = project?.GetEvaluation(build)?.GetProperties() ?? new Dictionary<string, string>(),
+                OutputAssemblyPath = outputAssemblyPath,
+                ProjectProperties = properties,
             };
 
 
             return invocation;
         }
+
 
         public static string TrimCompilerExeFromCommandLine(string commandLine, CompilerKind language)
         {

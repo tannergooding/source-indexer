@@ -255,3 +255,5 @@ paket-files/
 
 # MSBuild Binary Logs
 *.binlog
+
+*.lscache

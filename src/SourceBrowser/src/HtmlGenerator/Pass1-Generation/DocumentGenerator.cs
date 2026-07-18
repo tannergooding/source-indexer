@@ -19,6 +19,8 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
         public string relativePathToRoot;
         public string documentRelativeFilePathWithoutHtmlExtension;
 
+        private readonly ProjectGenerator.ReferenceCollector referenceCollector;
+
         private Classification classifier;
 
         public SourceText Text;
@@ -32,10 +34,12 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
 
         public DocumentGenerator(
             ProjectGenerator projectGenerator,
-            Document document)
+            Document document,
+            ProjectGenerator.ReferenceCollector referenceCollector)
         {
             this.projectGenerator = projectGenerator;
             this.Document = document;
+            this.referenceCollector = referenceCollector;
         }
 
         public async Task GenerateAsync()
@@ -70,9 +74,8 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
 
             // add the file itself as a "declared symbol", so that clicking on document in search
             // results redirects to the document
-            ProjectGenerator.AddDeclaredSymbolToRedirectMap(
-                this.projectGenerator.SymbolIDToListOfLocationsMap,
-                SymbolIdService.GetId(this.Document),
+            referenceCollector.AddDeclaredSymbolLocation(
+                SymbolIdService.GetId(documentRelativeFilePathWithoutHtmlExtension),
                 documentRelativeFilePathWithoutHtmlExtension,
                 0);
 
@@ -128,7 +131,7 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
 
         private void CalculateDocumentDestinationPath()
         {
-            documentRelativeFilePathWithoutHtmlExtension = Paths.GetRelativeFilePathInProject(Document);
+            documentRelativeFilePathWithoutHtmlExtension = projectGenerator.GetDocumentRelativePath(Document);
             documentDestinationFilePath = Path.Combine(ProjectDestinationFolder, documentRelativeFilePathWithoutHtmlExtension) + ".html";
         }
 
@@ -299,10 +302,17 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
                 return;
             }
 
+            // Flush once up front so the starting byte position is accurate, then track the
+            // position incrementally as each range is written. This avoids flushing the writer
+            // on every declared symbol occurrence just to read BaseStream.Length.
+            writer.Flush();
+            long bytePosition = writer.BaseStream.Length;
+
             foreach (var range in ranges)
             {
-                string html = GenerateRange(writer, range, lineCount);
+                string html = GenerateRange(range, bytePosition, lineCount);
                 writer.Write(html);
+                bytePosition += writer.Encoding.GetByteCount(html);
             }
         }
 
@@ -311,7 +321,7 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
             return lineCount > 30000;
         }
 
-        private string GenerateRange(StreamWriter writer, Classification.Range range, int lineCount = 0)
+        private string GenerateRange(Classification.Range range, long bytePosition, int lineCount = 0)
         {
             var html = range.Text;
             html = Markup.HtmlEscape(html);
@@ -370,15 +380,15 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
 
             if (hyperlinkInfo?.DeclaredSymbol != null)
             {
-                writer.Flush();
-                long streamPosition = writer.BaseStream.Length;
+                long streamPosition = bytePosition;
 
                 streamPosition += html.IndexOf(hyperlinkInfo.Attributes["id"] + ".html", StringComparison.Ordinal);
                 projectGenerator.AddDeclaredSymbol(
                     hyperlinkInfo.DeclaredSymbol,
                     hyperlinkInfo.DeclaredSymbolId,
                     documentRelativeFilePathWithoutHtmlExtension,
-                    streamPosition);
+                    streamPosition,
+                    referenceCollector);
             }
 
             return html;
@@ -399,7 +409,8 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
                             implicitInstanceConstructor,
                             symbolId,
                             documentRelativeFilePathWithoutHtmlExtension,
-                            0);
+                            0,
+                            referenceCollector);
                     }
                 }
             }

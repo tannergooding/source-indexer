@@ -1,21 +1,140 @@
-﻿html {
+:root {
+    /* Opt every element (incl. native form controls and scrollbars) into
+       light/dark theming so the browser renders them correctly in dark mode. */
+    color-scheme: light dark;
+
+    /* Single source of truth for the core surface palette. Component-specific
+       colors still live in their own rules; these drive the base surfaces and
+       are overridden as a group in the prefers-color-scheme: dark block below. */
+    --color-page-background: white;
+    --color-page-foreground: black;
+    --color-pane-border: #aaa;
+
+    /* Selection / focus highlight; identical in light and dark, so it is not
+       overridden in the dark block below. */
+    --color-selection: #3399ff;
+}
+
+html {
     display: flex;
+    background-color: var(--color-page-background);
+
+    /* Disable mobile browser font-boosting. It inflates text per-block by width,
+       so the wide #code pre would grow more than the narrow #ln pre and the line
+       numbers would drift out of alignment with their code lines down the page. */
+    -webkit-text-size-adjust: 100%;
+    -moz-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+
+    /* Suppress the default grey tap-flash on touch; the :active states on
+       interactive elements already provide press feedback. */
+    -webkit-tap-highlight-color: transparent;
 }
 
 body {
-    font-family: Segoe UI, Tahoma, Helvetica, sans-serif;
+    font-family: "Segoe UI", system-ui, Tahoma, Helvetica, Arial, sans-serif;
     cursor: text;
     margin: 0px;
     padding: 0px;
     flex: 1;
+    background-color: var(--color-page-background);
+    color: var(--color-page-foreground);
 }
 
 .body, p, ul, ol, h1, h2, h3 {
     margin: 20px;
 }
 
+/* Top-level layout for index.html (replaces the legacy <frameset>). The three
+   panes are named iframes (h/n/s) so all existing top.h/top.n/top.s frame
+   coordination in scripts.js keeps working unchanged. */
+.indexBody {
+    height: 100vh;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.headerFrame {
+    flex: none;
+    width: 100%;
+    height: 58px;
+    border: 0;
+}
+
+.paneContainer {
+    flex: 1 1 auto;
+    display: flex;
+    min-height: 0;
+}
+
+.navFrame {
+    flex: none;
+    width: 504px;
+    height: 100%;
+    border: 0;
+    border-right: 1px solid var(--color-pane-border);
+}
+
+.contentFrame {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    border: 0;
+}
+
+/* On narrow screens show one pane at a time instead of a 504px nav pane
+   crowding the content. The header toggle button (and the search / result-click
+   flows in scripts.js) flip the body's showNav class to pick which pane is
+   visible; the content/document pane is shown by default. */
+/* The single-pane mobile layout applies both to narrow (portrait) screens and to
+   short landscape screens on touch devices -- a phone in landscape is wide enough to
+   miss the width breakpoint but too short for a comfortable side-by-side split, so it
+   gets the same one-pane-at-a-time treatment as portrait. These pane rules live in the
+   top document, which sees the real device viewport; the matching pane toggle lives in
+   the header iframe and is revealed via a JS-set .landscapePhone class instead (see the
+   .headerBody.landscapePhone rule below and updateLandscapePhonePane in scripts.js). */
+@media only screen and (max-width: 700px),
+       only screen and (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+    .paneContainer {
+        flex-direction: column;
+    }
+
+    .navFrame,
+    .contentFrame {
+        flex: 1 1 auto;
+        width: 100%;
+        height: auto;
+        border: 0;
+    }
+
+    .navFrame {
+        display: none;
+    }
+
+    body.showNav .navFrame {
+        display: block;
+    }
+
+    body.showNav .contentFrame {
+        display: none;
+    }
+
+    /* Let long result rows and reference snippets wrap instead of forcing the
+       full-width nav pane to scroll sideways to read them. Tree nodes (folder /
+       type / file names) stay nowrap since they are short. */
+    .rL, a.rL, .referenceLine,
+    .resultItem,
+    .reference, .referenceDisabled {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+}
+
 h1 {
-    font-family: 'Segoe UI Light', 'Segoe UI', Tahoma, Helvetica, sans-serif;
+    font-family: 'Segoe UI Light', 'Segoe UI', system-ui, Tahoma, Helvetica, Arial, sans-serif;
     font-weight: 100;
     background-color: #0099ce;
     color: white;
@@ -23,7 +142,7 @@ h1 {
 }
 
 pre {
-    font-family: Consolas, 'Courier New', 'Andale Mono', 'Lucida Console', monospace;
+    font-family: Consolas, ui-monospace, SFMono-Regular, Menlo, 'Courier New', 'Andale Mono', 'Lucida Console', monospace;
     font-size: 12pt;
     line-height: 125%;
     tab-size: 4;
@@ -141,7 +260,7 @@ tr .ex {
     content: url(content/icons/plus.png);
 }
 
-.resultGroupHeader:hover {
+.resultGroupHeader:hover, .resultGroupHeader:active {
     background-color: #d4edff;
 }
 
@@ -169,7 +288,7 @@ tr .ex {
     content: url(content/icons/plus.png);
 }
 
-.rA:hover {
+.rA:hover, .rA:active {
     background-color: #d4edff;
 }
 
@@ -183,13 +302,13 @@ tr .ex {
 }
 
 .rL, a.rL, .referenceLine {
-    font-family: Consolas, 'Courier New', 'Andale Mono', 'Lucida Console', monospace;
+    font-family: Consolas, ui-monospace, SFMono-Regular, Menlo, 'Courier New', 'Andale Mono', 'Lucida Console', monospace;
     font-size: small;
     white-space: nowrap;
     display: block;
 }
 
-    .rL:hover, .referenceLine:hover {
+    .rL:hover, .referenceLine:hover, .rL:active, .referenceLine:active {
         background-color: #eeeeee;
     }
 
@@ -241,7 +360,7 @@ a i {
     border-bottom-style: solid;
 }
 
-    .resultItem:hover {
+    .resultItem:hover, .resultItem:active {
         background-color: #f6f6f6;
     }
 
@@ -290,6 +409,23 @@ a i {
     padding-bottom: 1px;
 }
 
+/* Repo/Solution grouping nodes only appear in the Solution Explorer tree when a merged site spans
+   more than one repo (or, within a repo, more than one solution) -- see Program.IndexSolutionsAsync
+   and SolutionFinalizer.WriteFolder. They get a bolder, tinted treatment so the repo/solution
+   boundaries are visually obvious at a glance, distinct from plain physical folders. */
+.repoTitle {
+    font-weight: bold;
+    background-color: #eef4fb;
+    border-left: 3px solid #4a90d9;
+    padding-left: 4px;
+    margin-left: -4px;
+}
+
+.solutionTitle {
+    font-weight: bold;
+    font-style: italic;
+}
+
 .typeTitle {
     white-space: nowrap;
     padding-top: 1px;
@@ -313,7 +449,7 @@ a i {
 }
 
     .typeDeclarationNode:focus, .tDN:focus {
-        background-color: #3399ff;
+        background-color: var(--color-selection);
         color: white;
     }
 
@@ -355,7 +491,7 @@ a i {
 }
 
     .cs:focus {
-        background-color: #3399ff;
+        background-color: var(--color-selection);
         color: white;
     }
 
@@ -375,7 +511,7 @@ a i {
 }
 
     .vb:focus {
-        background-color: #3399ff;
+        background-color: var(--color-selection);
         color: white;
     }
 
@@ -395,7 +531,7 @@ a i {
 }
 
     .csproj:focus {
-        background-color: #3399ff;
+        background-color: var(--color-selection);
         color: white;
     }
 
@@ -415,7 +551,7 @@ a i {
 }
 
     .vbproj:focus {
-        background-color: #3399ff;
+        background-color: var(--color-selection);
         color: white;
     }
 
@@ -435,7 +571,7 @@ a i {
 }
 
     .xaml:focus {
-        background-color: #3399ff;
+        background-color: var(--color-selection);
         color: white;
     }
 
@@ -455,7 +591,7 @@ a i {
 }
 
     .xml:focus {
-        background-color: #3399ff;
+        background-color: var(--color-selection);
         color: white;
     }
 
@@ -475,7 +611,7 @@ a i {
 }
 
     .resx:focus {
-        background-color: #3399ff;
+        background-color: var(--color-selection);
         color: white;
     }
 
@@ -495,12 +631,12 @@ a i {
 }
 
     .ts:focus {
-        background-color: #3399ff;
+        background-color: var(--color-selection);
         color: white;
     }
 
 .selectedFilename {
-    background-color: #3399ff;
+    background-color: var(--color-selection);
     color: white;
 }
 
@@ -561,21 +697,48 @@ a i {
 }
 
 .tb {
-    border: 0;
+    display: flex;
+    align-items: flex-start;
+    /* Grow to the code's width so the page itself (not a nested region) owns
+       horizontal scrolling. This keeps the browser's own horizontal scrollbar
+       at the viewport bottom where it's always reachable, instead of at the
+       bottom of the (tall) code where you'd have to scroll all the way down. */
+    width: max-content;
+    min-width: 100%;
+}
+
+/* Keep the line-number (and glyph) gutter frozen on the left while long code
+   lines scroll horizontally, and scrolling vertically with the code. `.tb` is
+   the sticky element's containing block and is wider than the viewport, while
+   the page (body) is the scrollport -- no ancestor sets `overflow`, which is
+   what silently breaks sticky. The opaque background and `z-index` mask the
+   code as it scrolls underneath. */
+.gutter {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    flex: none;
+    display: flex;
+    align-items: flex-start;
+    background-color: var(--color-page-background);
+}
+
+.codeScroll {
+    flex: none;
 }
 
 #ln, #glyph {
+    flex: none;
     margin-left: 16px;
     margin-right: 24px;
     margin-top: 0;
     color: #247b95;
     text-align: right;
-    vertical-align: top;
 }
 
 #code {
+    flex: none;
     margin: 0;
-    vertical-align: top;
     text-align: left;
 }
 
@@ -585,9 +748,28 @@ a i {
     bottom: 0;
     background-color: aliceblue;
     padding: 8px;
+    /* Pad past the iOS home-indicator / browser chrome safe area so the last
+       wrapped line isn't clipped at the very bottom of the viewport. */
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
     color: gray;
-    height: 50px;
+    /* Grow with the content instead of a hard 50px. On mobile the File/Project
+       paths wrap to extra lines; a fixed height pinned to `bottom: 0` pushed the
+       overflow below the viewport and cut it off. */
+    box-sizing: border-box;
+    min-height: 50px;
+    /* Long unbroken paths/URLs (no spaces) otherwise set the table cell's
+       min-content width, pushing the `width: 100%` table wider than the viewport
+       so the text runs off the edge. Allow such tokens to break and wrap. */
+    overflow-wrap: anywhere;
     opacity: 0.85;
+    /* Keep the footer above the code/gutter. The gutter and the
+       `-webkit-overflow-scrolling: touch` code scroller are composited on iOS,
+       and without an explicit stacking context Safari paints the line numbers
+       over the fixed footer as they scroll past it. Promoting `.dH` to its own
+       layer with a `z-index` forces the footer to stay on top. */
+    z-index: 100;
+    transform: translateZ(0);
+    backface-visibility: hidden;
 }
 
 .headerBody {
@@ -606,6 +788,10 @@ a i {
     border-width: 0px;
     vertical-align: top;
     display: inline-block;
+}
+
+#dotnetLogo.brandingHidden {
+    display: none;
 }
 
 #search-box {
@@ -631,6 +817,64 @@ a i {
     width: 100%;*/
 }
 
+/* Embedded directly into the page's "note" strip (results.html's "N results found:" bar, or
+   SolutionExplorer.html's static "Solution Explorer" label) via embedRepoFilterInNote() in
+   scripts.js, so it reads as a filter on that content rather than a separate control elsewhere
+   on the page. Only applied once scripts.js actually moves a select in, so a plain .note (no
+   filter, or a single-repo/untagged site) is completely unaffected. */
+.note.hasFilter {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* The repo filter dropdown itself. Hidden by default; scripts.js only shows it once the site has
+   more than one distinct repo tag to offer. */
+#repo-filter {
+    font-size: 11pt;
+    border-color: lightgray;
+    border-width: 1px;
+    border-style: solid;
+    padding: 3px 20px 3px 6px;
+    max-width: 200px;
+    flex: none;
+    background-color: white;
+    /* Matches the note's own ~28px content-box height (13pt/125% line-height text plus 8px
+       top/bottom padding, minus the border this control adds) so it sits comfortably inline
+       with the result count text rather than visibly stretching the note. */
+    box-sizing: border-box;
+    height: 28px;
+    /* The browser's native dropdown arrow ignores padding-right -- it's drawn flush against the
+       border regardless -- so appearance:none replaces it with a plain SVG chevron we can
+       actually position with background-position, leaving the padding above to reserve text
+       space in front of it. */
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'><path d='M0 0 L5 6 L10 0 Z' fill='gray'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+    background-size: 10px 6px;
+}
+
+/* Hides a Solution Explorer project subtree that doesn't match the selected repo filter (see
+   filterSolutionExplorerByRepo in scripts.js). A class rather than inline display is used so this
+   doesn't fight with the folder expand/collapse logic, which also toggles display on the same
+   [data-assembly] elements. */
+.repoHidden {
+    display: none !important;
+}
+
+/* Hides a repo grouping header once that repo is the one selected in the filter dropdown (see
+   filterSolutionExplorerByRepo in scripts.js) -- its folder is forced open at the same time, so
+   the tree reads the same as an ungrouped/single-repo site instead of showing an always-selected
+   wrapper around everything the user already scoped to. */
+.repoUnwrapped {
+    display: none !important;
+}
+
 #logoText {
     background-image: url(content/icons/microsoftlogo.png);
     background-repeat: no-repeat;
@@ -650,6 +894,13 @@ a i {
     display: inline-block;
 }
 
+/* Keep the "Source Browser" text/home-link itself when branding is off -- just drop the
+   Microsoft logo image and the left padding reserved for it. */
+#logoText.brandingHidden {
+    background-image: none;
+    padding-left: 0px;
+}
+
 #currentVersion {
     color: #e0e0e0;
     margin-top: 19px;
@@ -666,6 +917,143 @@ a i {
     top: 0px;
     right: 10px;
     padding: 18px;
+}
+
+/*
+ * Config selector (#104). Mounted INSIDE each content page itself, directly
+ * under that page's "dH" file-header block, as part of the code view --
+ * rather than as a persistent row spanning the whole index.html page above
+ * both panes -- see scripts.js's sbMountConfigSelectorIntoContentPage. It's
+ * mounted only when the CURRENTLY-DISPLAYED content page has anything to
+ * select between at all: a site can have 2+ registered configs overall yet
+ * still have plenty of pages that are entirely shared (no [data-configs]
+ * anywhere on them), so nothing is mounted there -- the overwhelming
+ * majority of pages even on a config-aware site -- and a 0/1-config site
+ * never mounts anything at all.
+ */
+.configSelectorPanel {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    box-sizing: border-box;
+    padding: 6px 12px;
+    background-color: var(--color-page-background);
+    border-bottom: 1px solid var(--color-pane-border);
+    font-size: 12px;
+}
+
+.configSelectorToggle {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-page-foreground);
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 18px;
+}
+
+/* A plain CSS-triangle chevron -- no icon asset needed. Points down when
+   expanded ("click to collapse"), rotates to point right when collapsed
+   ("click to expand"). */
+.configSelectorToggle::before {
+    content: "";
+    display: inline-block;
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid currentColor;
+    transition: transform 0.15s ease-in-out;
+}
+
+.configSelectorPanelCollapsed .configSelectorToggle::before {
+    transform: rotate(-90deg);
+}
+
+.configSelectorBody {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    min-width: 0;
+}
+
+.configAxisGroup {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.configSelectorLabel {
+    margin-right: 2px;
+    font-weight: 600;
+    color: var(--color-page-foreground);
+    opacity: 0.75;
+}
+
+/* Pill-style toggle for one axis value (e.g. "windows" within the "os"
+   axis). Active (selected/included) pills are filled; inactive ones are
+   outlined only, matching the approved option-a-refined-v2 mockup. */
+.configSelectorPill {
+    display: inline-block;
+    border: 1px solid var(--color-pane-border);
+    border-radius: 999px;
+    padding: 2px 10px;
+    margin: 0;
+    background: transparent;
+    color: var(--color-page-foreground);
+    font-size: 12px;
+    line-height: 16px;
+    cursor: pointer;
+}
+
+.configSelectorPillActive {
+    background-color: #68217A;
+    border-color: #68217A;
+    color: white;
+}
+
+/* Compact per-axis summary chip shown while the panel is collapsed, e.g.
+   "os: windows" or "arch: all" when that axis has no active restriction. */
+.configAxisSummaryPill {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 2px 10px;
+    background-color: var(--color-pane-border);
+    color: var(--color-page-foreground);
+    font-size: 11px;
+    line-height: 16px;
+    opacity: 0.85;
+}
+
+/* Applied/removed at runtime by sbApplyConfigFilter (scripts.js) to elements
+   carrying data-configs that don't overlap the current selection. */
+.configFilteredOut {
+    color: lightgray;
+    opacity: 0.5;
+}
+
+/* Switcher banner injected at the top of a file whose rendered content genuinely differs by
+   config (ConfigFileDeduper's "shared-render-divergent" bucket); each link is its own
+   data-configs-tagged span so the selector greys out configs the reader hasn't selected.
+   Hidden entirely -- the mounted .configSelectorPanel above is now the single control for
+   picking a config, and clicking a pill there already auto-navigates to the matching variant
+   (sbTryAutoNavigateToVariant). The markup stays in the page (not removed at generation time)
+   purely as data: that auto-navigate lookup still queries .configFileVariantLink[data-configs]
+   to find each variant's URL. */
+.configFileVariantBanner {
+    display: none;
+}
+
+/* Narrow-screen single-pane toggle; only shown at the <=700px breakpoint. */
+#paneToggle {
+    display: none;
 }
 
 #downloadButton {
@@ -869,7 +1257,7 @@ ol a, ol a:link, ol a:hover, ol a:focus, ol a:active,
     opacity: 0.9;
 }
 
-    .documentOutlineButton:hover {
+    .documentOutlineButton:hover, .documentOutlineButton:active {
         border-color: #eeccc0;
         background-color: #fff5ec;
     }
@@ -888,7 +1276,7 @@ ol a, ol a:link, ol a:hover, ol a:focus, ol a:active,
     opacity: 0.9;
 }
 
-    .projectExplorerButton:hover {
+    .projectExplorerButton:hover, .projectExplorerButton:active {
         border-color: #90e6d4;
         background-color: #dcfff8;
     }
@@ -907,12 +1295,37 @@ ol a, ol a:link, ol a:hover, ol a:focus, ol a:active,
     opacity: 0.9;
 }
 
-    .namespaceExplorerButton:hover {
+    .namespaceExplorerButton:hover, .namespaceExplorerButton:active {
         border-color: #e0e0e0;
         background-color: #f0f0f0;
     }
 
-.documentOutlineDiv:hover {
+/* Promote the fixed toolbar buttons to their own compositing layer so iOS
+   Safari keeps them steady instead of repainting (jittering) them while the
+   code window scrolls. */
+.documentOutlineButton,
+.projectExplorerButton,
+.namespaceExplorerButton {
+    transform: translateZ(0);
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+}
+
+/* Touch pointers: the stacked explorer buttons render at 48px (32px icon +
+   8px padding), a fine tap size, but the 50px offsets leave only a 2px gap
+   between adjacent targets. Space them out so neighboring buttons don't abut
+   and cause mis-taps. Left as-is for mouse pointers. */
+@media (pointer: coarse) {
+    .projectExplorerButton {
+        top: 56px;
+    }
+
+    .namespaceExplorerButton {
+        top: 112px;
+    }
+}
+
+.documentOutlineDiv:hover, .documentOutlineDiv:active {
     background-color: #f6f6f6;
 }
 
@@ -1006,125 +1419,140 @@ ol a, ol a:link, ol a:hover, ol a:focus, ol a:active,
     color: #747474;
 }
 
-@media only screen and (max-width: 462px) {
+/* Header layout is defined for the full-width case above; these breakpoints
+   progressively hide the non-essential header chrome as the viewport narrows.
+   Layered max-width queries stack, so e.g. below 462px all three apply. */
+@media only screen and (max-width: 1280px) {
     #dotnetLogo {
         display: none;
     }
 
+    #currentVersion {
+        display: none;
+    }
+}
+
+@media only screen and (max-width: 869px) {
+    #logoText {
+        display: none;
+    }
+}
+
+@media only screen and (max-width: 700px) {
+    /* Keep Help reachable on mobile -- it holds the only link to the overview/help page.
+       Drop the desktop float and sit it after the pane toggle as a flex sibling that
+       doesn't grow, so the search box still takes the remaining width. */
+    #headerMenu {
+        float: none;
+        flex: none;
+        padding: 0;
+    }
+
+    /* Size Help like the pane toggle so the two read as one consistent pair, rather than
+       Help's default 16px next to the toggle's 14px. */
+    #helpButtonLink {
+        display: inline-block;
+        margin: 0;
+        padding: 18px 8px;
+        font-size: 14px;
+        line-height: 20px;
+    }
+
+    /* The search box + pane toggle share this line -- lay them out as flex siblings and
+       let the browser reserve exact space for each. The toggle label ("Results"/"Code")
+       varies in width, so the old absolute toggle plus a fixed padding-right reservation
+       overlapped the search box in portrait; flex avoids the magic number entirely. */
     #searchBoxAndImages {
-        padding-right: 58px;
+        display: flex;
+        align-items: center;
         box-sizing: border-box;
-        display: block;
-    }
-
-    #search-box {
         width: 100%;
-    }
-
-    #logoText {
-        display: none;
-    }
-
-    #currentVersion {
-        display: none;
-    }
-
-    #headerMenu {
-        display: none;
-    }
-}
-
-@media only screen and (min-width: 463px) and (max-width: 869px) {
-    #dotnetLogo {
-        display: none;
-    }
-
-    #searchBoxAndImages {
+        padding-left: 8px;
     }
 
     #search-box {
-        width: 405px;
+        box-sizing: border-box;
+        /* Zero flex-basis (not `auto`) so the box grows from 0 rather than from
+           its base `width: 405px`. iOS Safari uses an input's intrinsic size as
+           the `auto` basis and won't shrink it even with `min-width: 0`, which
+           pushed the pane toggle off screen in portrait. */
+        flex: 1 1 0;
+        width: 0;
+        min-width: 0;
+        margin: 10px 0;
     }
 
-    #logoText {
-        display: none;
+    /* Keep the control from stretching to its widest option's text on a narrow phone. */
+    #repo-filter {
+        max-width: 120px;
+        font-size: 9pt;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        overflow: hidden;
     }
 
-    #currentVersion {
-        display: none;
-    }
-
-    #headerMenu {
+    #paneToggle {
         display: inline-block;
+        flex: none;
+        margin: 0;
+        padding: 18px 14px;
+        color: white;
+        font-size: 14px;
+        line-height: 20px;
+        white-space: nowrap;
+        cursor: pointer;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+
+    /* Fewer axis groups fit per row on narrow screens -- let each axis group
+       (and, within it, each pill) wrap onto its own line instead of clipping
+       or horizontally scrolling. */
+    .configSelectorPanel {
+        font-size: 11px;
+        padding: 6px 8px;
     }
 }
 
-@media only screen and (min-width: 870px) and (max-width: 1280px) {
-    #dotnetLogo {
-        display: none;
-    }
-
-    #searchBoxAndImages {
-    }
-
-    #search-box {
-        width: 405px;
-    }
-
-    #logoText {
-        display: inline-block;
-    }
-
-    #currentVersion {
-        display: none;
-    }
-
-    #headerMenu {
-        display: inline-block;
-    }
-}
-
-@media only screen and (min-width: 1281px) {
-    #dotnetLogo {
-        display: inline-block;
-    }
-
-    #searchBoxAndImages {
-    }
-
-    #search-box {
-        width: 405px;
-    }
-
-    #logoText {
-        display: inline-block;
-    }
-
-    #currentVersion {
-        display: inline-block;
-    }
-
-    #headerMenu {
-        display: inline-block;
-    }
+/* Landscape phones keep the desktop-width header layout (they are wide enough), but
+   they use the single-pane body layout (see the landscape term on the pane breakpoint
+   near the top), so they still need the pane toggle. The toggle lives in the fixed
+   58px-tall header iframe, whose own viewport is always short + landscape and so can't
+   tell a landscape phone from a portrait tablet via a CSS media query; scripts.js sets
+   .landscapePhone on the header body from a device-level matchMedia instead. */
+.headerBody.landscapePhone #paneToggle {
+    display: inline-block;
+    vertical-align: middle;
+    padding: 18px 14px;
+    color: white;
+    font-size: 14px;
+    line-height: 20px;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 @media (prefers-color-scheme: dark) {
+    /* Flip the shared palette; the base surfaces (html/body/panes) pick these
+       up automatically through the custom properties declared in :root. */
+    :root {
+        --color-page-background: black;
+        --color-page-foreground: #aaa;
+        --color-pane-border: #333;
+    }
+
+    /* Default text color for elements that don't inherit it (notably native
+       form controls like the search box); component-specific colors are set by
+       their own rules below. Backgrounds don't need a universal reset -- every
+       themed background is a class/id rule that outranks the page default, so a
+       light background never bleeds onto the dark page. */
     * {
-        background: transparent;
-        color: #aaa;
+        color: var(--color-page-foreground);
     }
 
     .imagePlusMinus, .resultGroupHeader::before, .rA::before {
         filter: invert(1);
-    }
-
-    html {
-        background: black;
-    }
-
-    body {
-        background: black;
     }
 
     h1 {
@@ -1174,11 +1602,16 @@ ol a, ol a:link, ol a:hover, ol a:focus, ol a:active,
         border-color: #665;
     }
 
+    .repoTitle {
+        background-color: #1c2b3d;
+        border-left-color: #4a90d9;
+    }
+
     .resultGroupHeader {
         background-color: #333;
     }
 
-        .resultGroupHeader:hover {
+        .resultGroupHeader:hover, .resultGroupHeader:active {
             background-color: #555;
         }
 
@@ -1186,20 +1619,12 @@ ol a, ol a:link, ol a:hover, ol a:focus, ol a:active,
         background-color: #123;
     }
 
-        .rA:hover {
+        .rA:hover, .rA:active {
             background-color: #123;
         }
 
-    .resultGroupProjectPath {
-        color: silver;
-    }
-
-    .rL:hover, .referenceLine:hover {
+    .rL:hover, .referenceLine:hover, .rL:active, .referenceLine:active {
         background-color: #333;
-    }
-
-    a b {
-        color: #247b95;
     }
 
     a i {
@@ -1221,67 +1646,13 @@ ol a, ol a:link, ol a:hover, ol a:focus, ol a:active,
         border-bottom-color: transparent;
     }
 
-        .resultItem:hover {
+        .resultItem:hover, .resultItem:active {
             background-color: #222;
         }
 
     .referenceDisabled {
         color: lightgray;
     }
-
-    .typeDeclarationNode:focus, .tDN:focus {
-        background-color: #3399ff;
-        color: white;
-    }
-
-    .cs:focus {
-        background-color: #3399ff;
-        color: white;
-    }
-
-    .vb:focus {
-        background-color: #3399ff;
-        color: white;
-    }
-
-    .csproj:focus {
-        background-color: #3399ff;
-        color: white;
-    }
-
-    .vbproj:focus {
-        background-color: #3399ff;
-        color: white;
-    }
-
-    .xaml:focus {
-        background-color: #3399ff;
-        color: white;
-    }
-
-    .xml:focus {
-        background-color: #3399ff;
-        color: white;
-    }
-
-    .resx:focus {
-        background-color: #3399ff;
-        color: white;
-    }
-
-    .ts:focus {
-        background-color: #3399ff;
-        color: white;
-    }
-
-    .selectedFilename {
-        background-color: #3399ff;
-        color: white;
-    }
-
-        .selectedFilename:link, .selectedFilename:visited, .selectedFilename:hover, .selectedFilename:active {
-            color: white;
-        }
 
     .currentResult {
         border-left-color: lightgray;
@@ -1307,10 +1678,6 @@ ol a, ol a:link, ol a:hover, ol a:focus, ol a:active,
         color: white;
     }
 
-    #ln, #glyph {
-        color: #247b95;
-    }
-
     .dH {
         background: linear-gradient(to right, #232 0%,#000 100%);
         color: gray;
@@ -1321,38 +1688,10 @@ ol a, ol a:link, ol a:hover, ol a:focus, ol a:active,
         background: linear-gradient(to right, #789 0%,#012 80%,#000 100%);
     }
 
-    #search-box {
+    #search-box,
+    #repo-filter {
         background-color: black;
         border-color: #555;
-    }
-
-    #logoText {
-        color: white;
-    }
-
-    #downloadButton {
-        background-color: #68217A;
-        color: white;
-    }
-
-    #feedbackButtonLink {
-        color: white;
-    }
-
-    #downloadButtonLink {
-        color: white;
-    }
-
-    #licenseButtonLink {
-        color: white;
-    }
-
-    #helpButtonLink {
-        color: white;
-    }
-
-    .result {
-        background-color: lightgoldenrodyellow;
     }
 
     .r {
@@ -1444,11 +1783,6 @@ ol a, ol a:link, ol a:hover, ol a:focus, ol a:active,
         color: #C0C0C0;
     }
 
-    .xlee {
-        color: #B96464;
-        background-color: #FFFEBF;
-    }
-
     a.s, a.s:hover {
         color: #8C6A5C;
     }
@@ -1480,7 +1814,7 @@ ol a, ol a:link, ol a:hover, ol a:focus, ol a:active,
         opacity: 0.9;
     }
 
-        .documentOutlineButton:hover {
+        .documentOutlineButton:hover, .documentOutlineButton:active {
             border-color: #eeccc0;
             background-color: #000;
         }
@@ -1491,7 +1825,7 @@ ol a, ol a:link, ol a:hover, ol a:focus, ol a:active,
         opacity: 0.9;
     }
 
-        .projectExplorerButton:hover {
+        .projectExplorerButton:hover, .projectExplorerButton:active {
             border-color: #90e6d4;
             background-color: #000;
         }
@@ -1502,12 +1836,12 @@ ol a, ol a:link, ol a:hover, ol a:focus, ol a:active,
         opacity: 0.9;
     }
 
-        .namespaceExplorerButton:hover {
+        .namespaceExplorerButton:hover, .namespaceExplorerButton:active {
             border-color: #e0e0e0;
             background-color: #000;
         }
 
-    .documentOutlineDiv:hover {
+    .documentOutlineDiv:hover, .documentOutlineDiv:active {
         background-color: #345;
     }
 
@@ -1527,20 +1861,6 @@ ol a, ol a:link, ol a:hover, ol a:focus, ol a:active,
 
         .inactiveTab:link, .inactiveTab:visited, .inactiveTab:hover, .inactiveTab:active {
             color: #777;
-        }
-
-    #sourcesList li {
-        background-color: steelblue;
-        color: white;
-    }
-
-    .externalIndexLinks li {
-        background-color: purple;
-        color: white;
-    }
-
-        .externalIndexLinks li a {
-            color: white;
         }
 
     .msbuildlink {

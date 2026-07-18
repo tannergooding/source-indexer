@@ -42,6 +42,14 @@ namespace Microsoft.SourceBrowser.SourceIndexServer.Controllers
             return Content(result, "text/html", Encoding.UTF8);
         }
 
+        [HttpGet("/api/repos")]
+        public IActionResult GetRepos()
+        {
+            var index = _provider.GetRequiredService<Index>();
+            var repos = index.GetDistinctRepoNames();
+            return Json(repos);
+        }
+
         [HttpGet("/api/symbolurl")]
         public IActionResult GetSymbolUrl(string symbolId)
         {
@@ -118,12 +126,9 @@ namespace Microsoft.SourceBrowser.SourceIndexServer.Controllers
 
         public static ulong GetMD5HashULong(string input, int digits)
         {
-            using (var md5 = MD5.Create()) // lgtm [cs/weak-crypto] Not used for crypto
-            {
-                var bytes = Encoding.UTF8.GetBytes(input);
-                var hashBytes = md5.ComputeHash(bytes);
-                return BitConverter.ToUInt64(hashBytes, 0);
-            }
+            var bytes = Encoding.UTF8.GetBytes(input);
+            var hashBytes = MD5.HashData(bytes);
+            return BitConverter.ToUInt64(hashBytes, 0);
         }
 
         private string UpdateUsages()

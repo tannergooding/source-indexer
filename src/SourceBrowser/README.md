@@ -1,6 +1,8 @@
 # SourceBrowser
 
-[![NuGet package](https://img.shields.io/nuget/v/SourceBrowser.svg)](https://nuget.org/packages/SourceBrowser)
+[![NuGet package](https://img.shields.io/nuget/v/TannerGooding.SourceBrowser.svg)](https://nuget.org/packages/TannerGooding.SourceBrowser)
+
+> This repository is a continuation of the original [KirillOsenkov/SourceBrowser](https://github.com/KirillOsenkov/SourceBrowser), which is now archived. 💜 Huge thanks to Kirill Osenkov and everyone who contributed to the original project. New work happens here, at [tannergooding/SourceBrowser](https://github.com/tannergooding/SourceBrowser).
 
 Source browser website generator that powers https://referencesource.microsoft.com, http://sourceroslyn.io, https://source.dot.net, and others.
 
@@ -10,28 +12,34 @@ Of course Source Browser allows you to browse its own source code:
 [http://sourcebrowser.azurewebsites.net](http://sourcebrowser.azurewebsites.net)
 
 Now also available on NuGet:
-[https://www.nuget.org/packages/SourceBrowser](https://www.nuget.org/packages/SourceBrowser)
+[https://www.nuget.org/packages/TannerGooding.SourceBrowser](https://www.nuget.org/packages/TannerGooding.SourceBrowser)
 
-## Instructions to Build (requires Visual Studio 2019):
- 1. git clone https://github.com/KirillOsenkov/SourceBrowser
+## Instructions to Build (requires Visual Studio 2026 and the .NET 10 SDK):
+ 1. git clone https://github.com/tannergooding/SourceBrowser
  2. cd SourceBrowser
  3. Build.cmd
  
 ## Instructions to generate and run a test website
  
- 1. GenerateTestSite.cmd
+ 1. GenerateTestSite.cmd -- generates a demo site from TestCode\TestSolution.sln (repo "RepoA") and
+    TestCode\RepoB\RepoB.slnx (repo "RepoB") across two configs (windows, linux), demonstrating
+    multi-repo grouping in Solution Explorer and the multi-axis config selector folded into the
+    code view (see e.g. TestSolution\PlatformInfo.cs, which differs by the `os` axis).
  2. RunTestSite.cmd
 
-## In Visual Studio 2019:
- 1. Open SourceBrowser.sln.
- 2. Set HtmlGenerator project as startup and hit F5 - it is preconfigured to generate a website for TestCode\TestSolution.sln.
+## In Visual Studio 2026:
+ 1. Open SourceBrowser.slnx.
+ 2. Set HtmlGenerator project as startup and hit F5 - it is preconfigured to generate a website for
+    TestCode\TestSolution.sln and TestCode\RepoB\RepoB.slnx as two separately-tagged repos with a
+    single `windows` config (a faster single-pass inner loop than GenerateTestSite.cmd's full
+    two-config demo; the config selector correctly stays hidden with only 1 config registered).
  3. Pass a path to an .sln file or a .csproj file (or multiple paths separated by spaces) to create an index for them
  4. Pass /out:<path> to HtmlGenerator.exe to configure where to generate the website to. This path will be used in step 6 as your "physicalPath".
  5. Pass /in:<path> to pass a file with a list of full paths to projects and solutions to include in the index
  6. Pass /root:<path> if you want to preserve relative .sln folders rather than merging all solutions. This folder must contain all specified .sln or .csproj paths.
  7. Set SourceIndexServer project as startup and run/debug the website.
 
-**Note:** Visual Studio 2019 is required to build Source Browser.
+**Note:** Visual Studio 2026 (with the .NET 10 SDK) is required to build Source Browser.
 
 ## Conceptual design
 
@@ -39,20 +47,28 @@ At indexing time, C# and VB source code is analyzed using Roslyn and a lot of st
 
 The only component that runs on the webserver is a service that given a search query does the lookup and returns a list of matching types and members, which are hyperlinks into the static HTML. The webservice keeps a list of all declared types and members in memory, this list is also precalculated at indexing time. All services, such as Find All References, Project Explorer, etc. are all pre-rendered. 
 
-The generator is not incremental. You have to generate into an empty folder from scratch every time, and then replace the currently deployed folder with the new contents atomically (using e.g. Azure Deployments, robocopy /MIR to inetpub\\wwwroot, etc). For smaller projects, deploying to Azure using Dropbox or Git would work just fine.
+By default the generator is not incremental: you generate into an empty folder from scratch every time (`/force`), then replace the currently deployed folder with the new contents atomically (using e.g. Azure Deployments, robocopy /MIR to inetpub\\wwwroot, etc). For smaller projects, deploying to Azure using Dropbox or Git would work just fine. An opt-in `/incremental` mode, along with multi-config sites and repo tagging, is also available -- see [docs/IncrementalConfigAndRepos.md](docs/IncrementalConfigAndRepos.md).
 
 ### Limitations and known issues
  1. Indexing more than one project with the same assembly name is currently unsupported. Only the first project wins. This is due to a fundamental design decision to only reference an assembly by short name. Customizers should add a means to filter "victim" projects out in their forks to pick the best single project for inclusion in the index.
  2. The generated website can only be hosted in the root of the domain. Making it run from a subdirectory is non-trivial and unlikely to be supported.
 
 ### Features
-* Solution Explorer - contents of projects merged into single tree on the left
+* Solution Explorer - contents of projects merged into single tree on the left, grouped under Repo and Solution nodes for multi-repo indexes
 * coloring for C#, VB, MSBuild, XAML and TypeScript
 * Go To Definition (click on a reference)
 * Find All Reference (click on a definition)
 * Project Explorer - in any document click on the Project link at the bottom
 * Namespace explorer - for a project view all types and members nested in namespace hierarchy
 * Document Outline - for a document click on the button in top right to display types and members in the current file
+* Fuzzy, camelCase-aware symbol search - exact and prefix matches rank first; quoting turns off prefix/fuzzy matching for exact string search
+* Repo/solution tagging and filtering - tag assemblies by source repo/solution during generation, then scope browsing and search with the repo filter dropdown or the `repo:`/`solution:` search keywords (see [docs/IncrementalConfigAndRepos.md](docs/IncrementalConfigAndRepos.md))
+* Incremental indexing (`/incremental`) - only regenerate projects whose sources or references changed
+* Multi-config sites (`/config:`, `/configAxes:`) - index the same sources built more than one way (e.g. windows vs. linux, x64 vs. arm64) with an in-page config selector
+* Pluggable index storage with an optional Azure Blob backend
+* Responsive layout - the viewer adapts to phones and tablets, collapsing the source and navigation panes into a single switchable pane
+* Reference resolution through forwarded types
+* `BinLogToSln` tool - convert an MSBuild binlog into a buildable solution
 * http://\<URL>/i.txt for the entire solution and /AssemblyName/i.txt (for an assembly) displays source code stats, lines of code, etc
 * http://\<URL>/#EmptyArrayAllocation finds all allocations of empty arrays (this feature is one-off and hardcoded and not extensible)
 * Clicking on the partial keyword will display a list of all files where this type is declared
@@ -62,6 +78,6 @@ The generator is not incremental. You have to generate into an empty folder from
 
 ## Project status and contributions
 
-This is a reference implementation that showcases the concepts and Roslyn usage. It comes with no guarantees, use at your own risk. We will consider accepting high-quality pull requests that add non-trivial value, however we have no plans to do significant work on the application in its current form. Any significant rearchitecture, adding large features, big refactorings won't be accepted because of resource constraints. Feel free to use it to generate websites for your own code, integrate in your CI servers etc. Feel free to do whatever you want in your own forks. Bug reports are gratefully accepted.
+This is a reference implementation that showcases the concepts and Roslyn usage. It comes with no guarantees, use at your own risk. Active development now happens in this repository. High-quality pull requests that add non-trivial value are welcome; please open an issue to discuss larger changes first. Feel free to use it to generate websites for your own code, integrate in your CI servers etc. Feel free to do whatever you want in your own forks. Bug reports are gratefully accepted.
 
-For any questions, feel free to reach out to [@KirillOsenkov](https://twitter.com/KirillOsenkov) on Twitter. Thanks to [@v2_matveev](https://twitter.com/v2_matveev) for contributing TypeScript support! Thanks to numerous other contributors for various fixes and contributions!
+This project builds on the original [SourceBrowser](https://github.com/KirillOsenkov/SourceBrowser) by [@KirillOsenkov](https://twitter.com/KirillOsenkov), now archived. Thanks to [@v2_matveev](https://twitter.com/v2_matveev) for contributing TypeScript support, and to the numerous other contributors for various fixes and contributions!

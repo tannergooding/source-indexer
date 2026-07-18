@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.SourceBrowser.Common;
 using CompilerInvocation = Microsoft.SourceBrowser.BinLogParser.CompilerInvocation;
 
@@ -12,12 +14,16 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
         public static readonly Dictionary<string, string> AssemblyNameToFilePathMap =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        public static void GenerateInvocation(CompilerInvocation invocation,
+        public static async Task GenerateInvocationAsync(CompilerInvocation invocation,
+            CancellationToken cancellationToken,
             IReadOnlyDictionary<string, string> serverPathMappings = null,
             HashSet<string> processedAssemblyList = null,
             HashSet<string> assemblyNames = null,
             Folder<ProjectSkeleton> solutionExplorerRoot = null,
-            Dictionary<(string, string), string> typeForwards = null)
+            Dictionary<(string, string), string> typeForwards = null,
+            bool includeSourceGeneratedDocuments = true,
+            string repoName = "",
+            string solutionName = "")
         {
             try
             {
@@ -36,19 +42,25 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
                         invocation.OutputAssemblyPath,
                         invocation.SolutionRoot,
                         Paths.SolutionDestinationFolder,
-                        typeForwards);
+                        typeForwards,
+                        includeSourceGeneratedDocuments);
                     solutionGenerator.ServerPathMappings = serverPathMappings;
                     solutionGenerator.GlobalAssemblyList = assemblyNames;
-                    solutionGenerator.Generate(processedAssemblyList, solutionExplorerRoot);
+                    solutionGenerator.RepoName = repoName ?? string.Empty;
+                    solutionGenerator.SolutionName = solutionName ?? string.Empty;
+                    await solutionGenerator.GenerateAsync(cancellationToken, processedAssemblyList, solutionExplorerRoot);
                 }
                 else
                 {
                     Log.Write(invocation.OutputAssemblyPath, ConsoleColor.Magenta);
-                    var solutionGenerator = new SolutionGenerator(
+                    var solutionGenerator = await SolutionGenerator.CreateAsync(
                         invocation.OutputAssemblyPath,
                         Paths.SolutionDestinationFolder,
+                        cancellationToken,
                         typeForwards: typeForwards);
-                    solutionGenerator.Generate();
+                    solutionGenerator.RepoName = repoName ?? string.Empty;
+                    solutionGenerator.SolutionName = solutionName ?? string.Empty;
+                    await solutionGenerator.GenerateAsync(cancellationToken);
                 }
             }
             catch (Exception ex)

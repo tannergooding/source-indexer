@@ -1,20 +1,25 @@
-﻿using System;
+﻿using Microsoft.CodeAnalysis;
+using Microsoft.VisualStudio.SolutionPersistence;
+using Microsoft.VisualStudio.SolutionPersistence.Model;
+using Microsoft.VisualStudio.SolutionPersistence.Serializer;
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
-using Microsoft.Build.Construction;
-using Microsoft.CodeAnalysis;
+using System.Threading;
+using System.Threading.Tasks;
 using Folder = Microsoft.SourceBrowser.HtmlGenerator.Folder<Microsoft.SourceBrowser.HtmlGenerator.ProjectSkeleton>;
 
 namespace Microsoft.SourceBrowser.HtmlGenerator
 {
     partial class SolutionGenerator
     {
-        public void AddProjectsToSolutionExplorer(Folder root, IEnumerable<Project> projects)
+        public async Task AddProjectsToSolutionExplorerAsync(Folder root, IEnumerable<Project> projects, CancellationToken cancellationToken)
         {
             Dictionary<string, IEnumerable<string>> projectToSolutionFolderMap = null;
             if (!Configuration.FlattenSolutionExplorer)
             {
-                projectToSolutionFolderMap = GetProjectToSolutionFolderMap(ProjectFilePath);
+                projectToSolutionFolderMap = await GetProjectToSolutionFolderMapAsync(ProjectFilePath, cancellationToken);
             }
 
             foreach (var project in projects)
@@ -35,46 +40,58 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
             var fullPath = project.FilePath;
             IEnumerable<string> folders = null;
 
-            // it is possible that the solution has more projects than mentioned in the .sln file
+            // it is possible that the solution has more projects than mentioned in the .sln/.slnx file
             // because Roslyn might add more projects from project references that aren't mentioned
-            // in the .sln
+            // in the .sln/.slnx
             projectToSolutionFolderMap?.TryGetValue(fullPath, out folders);
             AddProjectToFolder(root, project, folders);
         }
 
         private void AddProjectToFolder(Folder folder, Project project, IEnumerable<string> folders = null)
         {
-            if (folders == null || !folders.Any())
+            var folderList = folders?.ToArray() ?? Array.Empty<string>();
+
+            // Additive persistence only -- see Constants.SolutionFolderFileName. Written regardless of
+            // whether the project ends up nested or at the root (empty file = root), and is best-effort:
+            // a project this Pass1 run didn't actually generate output for (e.g. it was filtered out
+            // upstream) simply has no destination folder to write into.
+            var assemblyId = SymbolIdService.GetAssemblyId(project.AssemblyName);
+            var projectDestinationFolder = Path.Combine(SolutionDestinationFolder, assemblyId);
+            if (Directory.Exists(projectDestinationFolder))
             {
-                folder.Add(new ProjectSkeleton(project.AssemblyName, project.Name));
+                File.WriteAllLines(Path.Combine(projectDestinationFolder, Constants.SolutionFolderFileName), folderList);
+            }
+
+            if (folderList.Length == 0)
+            {
+                folder.Add(new ProjectSkeleton(project.AssemblyName, project.Name, RepoName));
             }
             else
             {
-                var subfolder = folder.GetOrCreateFolder(folders.First());
-                AddProjectToFolder(subfolder, project, folders.Skip(1));
+                var subfolder = folder.GetOrCreateFolder(folderList[0]);
+                AddProjectToFolder(subfolder, project, folderList.Skip(1));
             }
         }
 
-        private static Dictionary<string, IEnumerable<string>> GetProjectToSolutionFolderMap(string solutionFilePath)
+        private static async Task<Dictionary<string, IEnumerable<string>>> GetProjectToSolutionFolderMapAsync(string solutionFilePath, CancellationToken cancellationToken)
         {
-            if (!solutionFilePath.EndsWith(".sln", StringComparison.OrdinalIgnoreCase))
+            if (!solutionFilePath.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) &&
+                !solutionFilePath.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
             {
                 return null;
             }
 
-            var solutionFile = SolutionFile.Parse(solutionFilePath);
+            string solutionDirectory = Path.GetDirectoryName(solutionFilePath);
+
+            ISolutionSerializer serializer = SolutionSerializers.GetSerializerByMoniker(solutionFilePath);
+            SolutionModel solutionModel = await serializer.OpenAsync(solutionFilePath, cancellationToken);
 
             var result = new Dictionary<string, IEnumerable<string>>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var project in solutionFile.ProjectsInOrder)
+            foreach (var projectModel in solutionModel.SolutionProjects)
             {
-                if (project.ProjectType == SolutionProjectType.SolutionFolder)
-                {
-                    continue;
-                }
-
-                var path = GetAbsoluteFilePath(project);
-                var parentFolderChain = GetParentFolderChain(solutionFile, project);
+                var path = GetAbsoluteFilePath(solutionDirectory, projectModel);
+                var parentFolderChain = GetParentFolderChain(solutionModel, projectModel);
 
                 result.Add(path, parentFolderChain);
             }
@@ -82,26 +99,30 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
             return result;
         }
 
-        private static string GetAbsoluteFilePath(ProjectInSolution project)
+        private static string GetAbsoluteFilePath(string solutionDirectory, SolutionProjectModel projectModel)
         {
-            var path = project.AbsolutePath;
-            if (string.IsNullOrEmpty(path))
+            var projectFilePath = projectModel.FilePath;
+
+            if (string.IsNullOrEmpty(projectFilePath))
             {
-                path = project.ProjectName;
+                projectFilePath = projectModel.DisplayName;
             }
 
-            return path;
+            // Normalize to a full path so this matches Roslyn's Project.FilePath (an absolute,
+            // normalized path) used as the lookup key -- projectModel.FilePath can be relative, carry
+            // '..' segments, or already be absolute, any of which would otherwise miss the map lookup.
+            return Path.GetFullPath(Path.Combine(solutionDirectory, projectFilePath));
         }
 
-        private static List<string> GetParentFolderChain(SolutionFile solutionFile, ProjectInSolution project)
+        private static List<string> GetParentFolderChain(SolutionModel solutionModel, SolutionProjectModel projectModel)
         {
             var parentFolderChain = new List<string>();
-            var parentGuid = project.ParentProjectGuid;
+            var folderModel = projectModel.Parent;
 
-            while (!string.IsNullOrEmpty(parentGuid) && solutionFile.ProjectsByGuid.TryGetValue(parentGuid, out ProjectInSolution parentFolder) && parentFolder != null)
+            while (folderModel is not null)
             {
-                parentFolderChain.Add(parentFolder.ProjectName);
-                parentGuid = parentFolder.ParentProjectGuid;
+                parentFolderChain.Add(folderModel.Name);
+                folderModel = folderModel.Parent;
             }
 
             parentFolderChain.Reverse();

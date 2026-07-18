@@ -26,9 +26,36 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
         public SolutionGenerator SolutionGenerator { get; private set; }
         public string ProjectSourcePath { get; set; }
         public string ProjectFilePath { get; private set; }
+
+        /// <summary>Repo/solution tags inherited from the owning SolutionGenerator, if any.</summary>
+        public string RepoName => SolutionGenerator?.RepoName ?? string.Empty;
+        public string SolutionName => SolutionGenerator?.SolutionName ?? string.Empty;
         public List<string> OtherFiles { get; set; }
         public IEnumerable<MEF.ISymbolVisitor> PluginSymbolVisitors { get; private set; }
         public IEnumerable<MEF.ITextVisitor> PluginTextVisitors { get; private set; }
+
+        // Populated once, single-threaded, before documents are partitioned for parallel generation
+        // (see GenerateAsync). Maps each Document to a relative destination path that's been
+        // disambiguated from any other Document that would otherwise collide on the same
+        // folders+filename (see Paths.DisambiguateRelativePaths).
+        private Dictionary<DocumentId, string> documentRelativePaths;
+
+        /// <summary>
+        /// Returns the (possibly disambiguated) relative destination path for <paramref name="document"/>.
+        /// Falls back to the raw, non-disambiguated computation for documents outside the normal
+        /// per-project document set (e.g. this can be reached for any document, but is only
+        /// disambiguated for documents in this project's <c>documents</c> list).
+        /// </summary>
+        public string GetDocumentRelativePath(Document document)
+        {
+            if (documentRelativePaths != null &&
+                documentRelativePaths.TryGetValue(document.Id, out var relativePath))
+            {
+                return relativePath;
+            }
+
+            return Paths.GetRelativeFilePathInProject(document);
+        }
 
         public ProjectGenerator(SolutionGenerator solutionGenerator, Project project) : this()
         {
@@ -65,14 +92,13 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
             }
         }
 
+        // Only reached from the single-threaded loose-files pass (GenerateNonProjectFolder), so no
+        // locking is needed on the shared map.
         private void AddFileToRedirectMap(string filePath)
         {
-            lock (SymbolIDToListOfLocationsMap)
-            {
-                SymbolIDToListOfLocationsMap.Add(
-                    SymbolIdService.GetId(filePath),
-                    new List<Tuple<string, long>> { Tuple.Create(filePath, 0L) });
-            }
+            SymbolIDToListOfLocationsMap.Add(
+                SymbolIdService.GetId(filePath),
+                new List<Tuple<string, long>> { Tuple.Create(filePath, 0L) });
         }
 
         private ProjectGenerator()
@@ -126,6 +152,27 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
                     ProjectSourcePath = ProjectFilePath;
                 }
 
+                // Incremental runs (/incremental): skip regenerating this project entirely if its
+                // staleness key -- derived from its own source, its direct references, and its
+                // compilation/parse options (see ProjectStaleness) -- is unchanged since whatever
+                // produced the output already sitting in ProjectDestinationFolder. This must be checked
+                // before the "someone already generated this assembly name" guard below, since on an
+                // incremental run that guard would otherwise misfire against our own valid prior output.
+                string currentStalenessKey = null;
+                if (Configuration.Incremental)
+                {
+                    currentStalenessKey = await ProjectStaleness.ComputeKeyAsync(Project).ConfigureAwait(false);
+                    var stalenessKeyFile = Path.Combine(ProjectDestinationFolder, Constants.StalenessKeyFileName + ".txt");
+                    var priorRunMarkerFile = Path.Combine(ProjectDestinationFolder, Constants.ProjectInfoFileName + ".txt");
+                    if (File.Exists(stalenessKeyFile) &&
+                        File.Exists(priorRunMarkerFile) &&
+                        string.Equals(File.ReadAllText(stalenessKeyFile), currentStalenessKey, StringComparison.Ordinal))
+                    {
+                        Log.Write("Skipping unchanged project (staleness key match): " + ProjectDestinationFolder, ConsoleColor.DarkGray);
+                        return;
+                    }
+                }
+
                 if (File.Exists(Path.Combine(ProjectDestinationFolder, Constants.DeclaredSymbolsFileName + ".txt")))
                 {
                     // apparently someone already generated a project with this assembly name - their assembly wins
@@ -150,25 +197,50 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
                     }
                 }
 
+                // Compute unique destination paths up front, single-threaded, so that two distinct
+                // documents that happen to resolve to the same folders+filename (e.g. two unrelated
+                // "IEnumerable.cs" files) don't silently collide once generation is partitioned and
+                // parallelized below -- see Paths.DisambiguateRelativePaths for the exact semantics.
+                var rawRelativePaths = documents.Select(Paths.GetRelativeFilePathInProject).ToArray();
+                var identityKeys = documents.Select(d => d.FilePath ?? d.Name).ToArray();
+                var disambiguatedRelativePaths = Paths.DisambiguateRelativePaths(rawRelativePaths, identityKeys);
+
+                documentRelativePaths = new Dictionary<DocumentId, string>(documents.Count);
+                for (int i = 0; i < documents.Count; i++)
+                {
+                    documentRelativePaths[documents[i].Id] = disambiguatedRelativePaths[i];
+                }
+
+                var collectors = new ConcurrentBag<ReferenceCollector>();
                 var generationTasks = Partitioner.Create(documents)
                     .GetPartitions(Environment.ProcessorCount)
                     .Select(partition =>
                         Task.Run(async () =>
                         {
+                            var collector = new ReferenceCollector();
+                            collectors.Add(collector);
                             using (partition)
                             {
                                 while (partition.MoveNext())
                                 {
-                                  await GenerateDocumentAsync(partition.Current);
+                                  await GenerateDocumentAsync(partition.Current, collector);
                                 }
                             }
                         }));
 
                 await Task.WhenAll(generationTasks);
 
+                // Fold the per-partition collectors into the shared maps now that all Tasks have
+                // completed, so the merge runs single-threaded and needs no locking.
+                foreach (var collector in collectors)
+                {
+                    MergeReferences(collector);
+                    MergeDeclarations(collector);
+                }
+
                 foreach (var document in documents)
                 {
-                    OtherFiles.Add(Paths.GetRelativeFilePathInProject(document));
+                    OtherFiles.Add(GetDocumentRelativePath(document));
                 }
 
                 if (Configuration.WriteProjectAuxiliaryFilesToDisk)
@@ -189,6 +261,15 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
                     GenerateProjectExplorer();
                     GenerateNamespaceExplorer();
                     GenerateIndex();
+
+                    if (Configuration.Incremental && currentStalenessKey != null)
+                    {
+                        // Record the key this output was generated from so a later incremental run can
+                        // detect whether this project is still up to date.
+                        File.WriteAllText(
+                            Path.Combine(ProjectDestinationFolder, Constants.StalenessKeyFileName + ".txt"),
+                            currentStalenessKey);
+                    }
                 }
 
                 var compilation = await Project.GetCompilationAsync();
@@ -222,11 +303,11 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
             NamespaceExplorer.WriteNamespaceExplorer(this.AssemblyName, symbols, ProjectDestinationFolder);
         }
 
-        private async Task GenerateDocumentAsync(Document document)
+        private async Task GenerateDocumentAsync(Document document, ReferenceCollector collector)
         {
             try
             {
-                var documentGenerator = new DocumentGenerator(this, document);
+                var documentGenerator = new DocumentGenerator(this, document, collector);
                 await documentGenerator.GenerateAsync();
             }
             catch (Exception e)

@@ -104,9 +104,9 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
         }
 
         private const string referencesFileHeader = @"<!DOCTYPE html>
-<html><head><title>{0}</title><link rel=""stylesheet"" href=""../../styles.css""/><script src=""../../scripts.js""></script></head><body onload=""ro();"">";
+<html><head><meta charset=""utf-8""><meta name=""viewport"" content=""width=device-width, initial-scale=1""><title>{0}</title><link rel=""stylesheet"" href=""../../styles.css""/><script src=""../../scripts.js""></script></head><body onload=""ro();"">";
 
-        public static void WriteReferencesFileHeader(StreamWriter writer, string title)
+        public static void WriteReferencesFileHeader(TextWriter writer, string title)
         {
             writer.WriteLine(referencesFileHeader, title);
         }
@@ -116,7 +116,7 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
         public static void WriteReferencesNotFoundFile(string folder)
         {
             const string html = @"<!DOCTYPE html>
-<html><head><link rel=""stylesheet"" href=""styles.css""/></head>
+<html><head><meta charset=""utf-8""><meta name=""viewport"" content=""width=device-width, initial-scale=1""><link rel=""stylesheet"" href=""styles.css""/></head>
 <body><div class=""rH"">No references found</div></body></html>";
             string filePath = Path.Combine(folder, zeroFileName);
             if (!File.Exists(filePath))
@@ -134,6 +134,8 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
                 string contents = @"<!DOCTYPE html>
 <html>
 <head>
+<meta charset=""utf-8"">
+<meta name=""viewport"" content=""width=device-width, initial-scale=1"">
 <title>Redirecting...</title>
 <link rel=""stylesheet"" href=""../styles.css"">
 <script src=""../scripts.js""></script>
@@ -157,9 +159,9 @@ redirectToReferences();
         }
 
         private static string documentHtmlPrefixTemplate = @"<!DOCTYPE html>
-<html><head><title>{0}</title><link rel=""stylesheet"" href=""{1}styles.css""><script src=""{1}scripts.js""></script></head>
+<html><head><meta charset=""utf-8""><meta name=""viewport"" content=""width=device-width, initial-scale=1""><title>{0}</title><link rel=""stylesheet"" href=""{1}styles.css""><script src=""{1}scripts.js""></script></head>
 <body class=""cB"" onload=""{3}({2});"">";
-        private static string documentTablePrefix = @"<div class=""cz""><table class=""tb"" cellpadding=""0"" cellspacing=""0""><tr>{1}<td valign=""top"" align=""right""><pre id=""ln"">{0}</pre></td><td valign=""top"" align=""left""><pre id=""code"">";
+        private static string documentTablePrefix = @"<div class=""cz""><div class=""tb""><div class=""gutter"">{1}<pre id=""ln"">{0}</pre></div><div class=""codeScroll""><pre id=""code"">";
 
         public static string GetDocumentPrefix(string title, string relativePathToRoot, int lineCount, string customJSOnloadFunction = "i")
         {
@@ -177,7 +179,7 @@ redirectToReferences();
             var lineNumberText = GenerateLineNumberText(pregenerateLineNumbers, documentUrl);
             if (!string.IsNullOrWhiteSpace(glyphHtml))
             {
-                glyphHtml = $@"<td valign=""top"" align=""right""><pre id=""glyph"">{glyphHtml}</pre></td>";
+                glyphHtml = $@"<pre id=""glyph"">{glyphHtml}</pre>";
             }
 
             return string.Format(documentTablePrefix, lineNumberText, glyphHtml);
@@ -205,16 +207,20 @@ redirectToReferences();
 
         public static string GetDocumentSuffix()
         {
-            return "</pre></td></tr></table></div></body></html>";
+            return "</pre></div></div></div></body></html>";
         }
 
-        public static void WriteMetadataToSourceRedirectPrefix(StreamWriter writer)
+        public static void WriteMetadataToSourceRedirectPrefix(StreamWriter writer, bool includeFileList = false)
         {
-            const string contents = @"<!DOCTYPE html>
-<html><head><title>Redirecting...</title><script src=""../scripts.js""></script>
-<script>
-";
-            writer.WriteLine(contents);
+            writer.WriteLine(@"<!DOCTYPE html>
+<html><head><title>Redirecting...</title><script src=""../scripts.js""></script>");
+
+            if (includeFileList)
+            {
+                writer.WriteLine(@"<script src=""A.files.js""></script>");
+            }
+
+            writer.WriteLine("<script>");
         }
 
         public static void WriteMetadataToSourceRedirectSuffix(StreamWriter writer)
@@ -257,7 +263,7 @@ Don't use this page directly, pass #symbolId to get redirected.
 
         public static void WriteProjectExplorerPrefix(StringBuilder sb, string projectTitle)
         {
-            sb.AppendFormat(@"<!DOCTYPE html><html><head><title>{0}</title>
+            sb.AppendFormat(@"<!DOCTYPE html><html><head><meta charset=""utf-8""><meta name=""viewport"" content=""width=device-width, initial-scale=1""><title>{0}</title>
 <link rel=""stylesheet"" href=""../styles.css"">
 <script src=""../scripts.js""></script>
 </head><body class=""projectExplorerBody"">
@@ -272,12 +278,15 @@ Don't use this page directly, pass #symbolId to get redirected.
 
         public static void WriteSolutionExplorerPrefix(TextWriter writer)
         {
-            writer.WriteLine(@"<!DOCTYPE html><html><head><title>Solution Explorer</title><link rel=""stylesheet"" href=""styles.css"" /><script src=""scripts.js""></script></head>
+            // A short, static "Solution Explorer" label replaces the old instructional
+            // sentence (which read oddly once the repo filter sat inline with it). This gives
+            // the filter a consistent note-styled home to embed into, matching results.html,
+            // without any dynamic per-search text to keep in sync here.
+            writer.WriteLine(@"<!DOCTYPE html><html><head><meta charset=""utf-8""><meta name=""viewport"" content=""width=device-width, initial-scale=1""><title>Solution Explorer</title><link rel=""stylesheet"" href=""styles.css"" /><script src=""scripts.js""></script></head>
 <body class=""solutionExplorerBody"">
-    <div>
-        <div class=""note"">
-            Enter a type or member name or <a href=""/#q=assembly%20"" target=""_top"" class=""blueLink"" onclick=""populateSearchBox('assembly '); return false;"">filter the assembly list</a>.
-        </div>
+    <div class=""note"">
+        Solution Explorer
+        <select id=""repo-filter"" style=""display:none"" aria-label=""Filter search to a repo""></select>
     </div>
 <div id=""rootFolder"" style=""display: none;"" class=""folderTitle"">");
         }
@@ -289,7 +298,7 @@ Don't use this page directly, pass #symbolId to get redirected.
 
         public static void WriteNamespaceExplorerPrefix(string assemblyName, StreamWriter sw, string pathPrefix = "")
         {
-            sw.WriteLine(string.Format(@"<!DOCTYPE html><html><head><title>Namespaces</title>
+            sw.WriteLine(string.Format(@"<!DOCTYPE html><html><head><meta charset=""utf-8""><meta name=""viewport"" content=""width=device-width, initial-scale=1""><title>Namespaces</title>
 <link rel=""stylesheet"" href=""{0}styles.css"">
 <script src=""{0}scripts.js""></script>
 </head><body class=""namespaceExplorerBody"">
@@ -340,11 +349,12 @@ Don't use this page directly, pass #symbolId to get redirected.
 
         public static string GetResultsHtmlPrefix()
         {
-            return @"<!DOCTYPE html><html><head><title>Results</title>
+            return @"<!DOCTYPE html><html><head><meta charset=""utf-8""><meta name=""viewport"" content=""width=device-width, initial-scale=1""><title>Results</title>
 <link rel=""stylesheet"" href=""styles.css"" />
 <script src=""scripts.js""></script>
 </head>
 <body onload=""onResultsLoad();"">
+<select id=""repo-filter"" style=""display:none"" aria-label=""Filter search to a repo""></select>
 <div id=""symbols"" aria-live=""polite"">
 <div class=""note"">
 Enter a type or member name or <a href=""/#q=assembly%20"" target=""_top"" class=""blueLink"" onclick=""populateSearchBox('assembly '); return false;"">filter the assembly list</a>.
@@ -363,8 +373,8 @@ Enter a type or member name or <a href=""/#q=assembly%20"" target=""_top"" class
         }
 
         private static string partialTypeDisambiguationFileTemplate = @"<!DOCTYPE html>
-<html><head><link rel=""stylesheet"" href=""{0}"">
-</head><body><h2 class=""partialTypeHeader"">Partial Type</h2>
+<html><head><meta charset=""utf-8""><meta name=""viewport"" content=""width=device-width, initial-scale=1""><link rel=""stylesheet"" href=""{0}"">{2}
+</head><body{3}><div class=""partialTypeHeader"">Partial Type</div>
 {1}
 </body></html>";
 
@@ -374,6 +384,46 @@ Enter a type or member name or <a href=""/#q=assembly%20"" target=""_top"" class
             string symbolId,
             IEnumerable<string> filePaths)
         {
+            GeneratePartialTypeDisambiguationFile(solutionDestinationFolder, projectDestinationFolder, symbolId, filePaths, configTagsByFilePath: null);
+        }
+
+        /// <summary>
+        /// Same disambiguation page used for ordinary partial types/members (one symbol ID declared in
+        /// multiple files), extended to optionally annotate each link with the config(s) it applies
+        /// under -- e.g. a symbol declared in Environment.Windows.cs under "windows" and
+        /// Environment.Unix.cs under "linux"/"mac" is just a multi-location symbol like any other
+        /// partial type, with a config tag as extra metadata on each location. When
+        /// <paramref name="configTagsByFilePath"/> is null (the default, single/no-config case), this
+        /// renders byte-identically to the untagged overload.
+        /// </summary>
+        public static void GeneratePartialTypeDisambiguationFile(
+            string solutionDestinationFolder,
+            string projectDestinationFolder,
+            string symbolId,
+            IEnumerable<string> filePaths,
+            IReadOnlyDictionary<string, IEnumerable<string>> configTagsByFilePath)
+        {
+            GeneratePartialTypeDisambiguationFile(solutionDestinationFolder, projectDestinationFolder, symbolId, filePaths, configTagsByFilePath, allConfigs: null);
+        }
+
+        /// <summary>
+        /// Same as the five-argument overload, but when <paramref name="allConfigs"/> is supplied (the
+        /// config-aware merge path) each location link also gets a machine-readable
+        /// <c>data-configs="a,b"</c> attribute -- mirroring
+        /// <see cref="ProjectFinalizer.WriteDataConfigsAttribute"/>'s FAR gating -- so the client
+        /// config-selector can filter these links the same way it filters FAR entries. The existing
+        /// visible <c>[a, b]</c> span is untouched. Omitted (both attribute and gating) when
+        /// <paramref name="allConfigs"/> is null, so the single/no-config path renders byte-identically
+        /// to before this parameter existed.
+        /// </summary>
+        public static void GeneratePartialTypeDisambiguationFile(
+            string solutionDestinationFolder,
+            string projectDestinationFolder,
+            string symbolId,
+            IEnumerable<string> filePaths,
+            IReadOnlyDictionary<string, IEnumerable<string>> configTagsByFilePath,
+            IReadOnlyCollection<string> allConfigs)
+        {
             string partialFolder = Path.Combine(projectDestinationFolder, Constants.PartialResolvingFileName);
             Directory.CreateDirectory(partialFolder);
             var disambiguationFileName = Path.Combine(partialFolder, symbolId) + ".html";
@@ -381,11 +431,49 @@ Enter a type or member name or <a href=""/#q=assembly%20"" target=""_top"" class
                 filePaths
                 .OrderBy(filePath => Paths.StripExtension(filePath))
                 .Select((filePath, index) =>
-                    $"<div class=\"partialTypeLink\"><a{(index == 0 ? $" id=\"{symbolId}\"" : "")} href=\"../{filePath}.html#{symbolId}\">{filePath}</a></div>"));
+                {
+                    string configTag = "";
+                    string dataConfigsAttribute = "";
+                    if (configTagsByFilePath != null &&
+                        configTagsByFilePath.TryGetValue(filePath, out var configs) &&
+                        configs != null)
+                    {
+                        var configList = configs.OrderBy(c => c, StringComparer.OrdinalIgnoreCase).ToList();
+                        if (configList.Count > 0)
+                        {
+                            configTag = $" <span class=\"partialTypeConfigTag\">[{string.Join(", ", configList)}]</span>";
+
+                            // Fully shared across every registered config -- inert, don't tag (matches
+                            // WriteDataConfigsAttribute's "shared -> untagged" convention).
+                            if (allConfigs != null && allConfigs.Count > 0 && !allConfigs.All(configList.Contains))
+                            {
+                                dataConfigsAttribute = $" data-configs=\"{string.Join(",", configList)}\"";
+                            }
+                        }
+                    }
+
+                    return $"<div class=\"partialTypeLink\"><a{(index == 0 ? $" id=\"{symbolId}\"" : "")}{dataConfigsAttribute} href=\"../{filePath}.html#{symbolId}\">{filePath}</a>{configTag}</div>";
+                }));
+
+            // Only include scripts.js / call the config-filter entry point when this is a config-aware
+            // render (allConfigs != null) -- the ordinary single/no-config path never needed any script
+            // on this page and must stay byte-identical to before this parameter existed.
+            string scriptsTag = "";
+            string bodyOnload = "";
+            if (allConfigs != null && allConfigs.Count > 0)
+            {
+                var scriptsPath = Paths.GetCssPathFromFile(solutionDestinationFolder, disambiguationFileName);
+                scriptsPath = scriptsPath.Substring(0, scriptsPath.Length - "styles.css".Length) + "scripts.js";
+                scriptsTag = $"<script src=\"{scriptsPath}\"></script>";
+                bodyOnload = " onload=\"sbApplyConfigFilter(document);\"";
+            }
+
             string content = string.Format(
                 partialTypeDisambiguationFileTemplate,
                 Paths.GetCssPathFromFile(solutionDestinationFolder, disambiguationFileName),
-                list);
+                list,
+                scriptsTag,
+                bodyOnload);
             File.WriteAllText(disambiguationFileName, content, Encoding.UTF8);
         }
 

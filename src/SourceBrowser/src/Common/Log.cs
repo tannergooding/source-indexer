@@ -1,8 +1,6 @@
 using System;
+using System.Collections.Concurrent;
 using System.IO;
-using System.Reactive.Concurrency;
-using System.Reactive.Linq;
-using System.Reactive.Subjects;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -19,7 +17,15 @@ namespace Microsoft.SourceBrowser.Common
         private static string messageLogFilePath = Path.GetFullPath(MessageLogFile);
 
         private static TaskCompletionSource<object> completedTask = new TaskCompletionSource<object>();
-        private static readonly Subject<IMessage> Messages = new Subject<IMessage>();
+        private static readonly BlockingCollection<IMessage> Messages = new BlockingCollection<IMessage>();
+
+        private static readonly Thread loggerThread;
+
+        private static int errorCount;
+
+        // Number of severe errors logged so far. HtmlGenerator uses this to return a non-zero exit code
+        // when indexing hit a real failure, so CI catches broken runs instead of treating them as success.
+        public static int ErrorCount => Volatile.Read(ref errorCount);
 
         private static void OnNext(IMessage msg)
         {
@@ -34,17 +40,24 @@ namespace Microsoft.SourceBrowser.Common
             }
         }
 
-        private static Thread ThreadFactory(ThreadStart start)
-        {
-            var thread = new Thread(start);
-            thread.IsBackground = true;
-            thread.Name = "ThreadLogger";
-            return thread;
-        }
-
         static Log()
         {
-            Messages.ObserveOn(new NewThreadScheduler(ThreadFactory)).Subscribe(OnNext, OnCompleted);
+            loggerThread = new Thread(ProcessMessages)
+            {
+                IsBackground = true,
+                Name = "ThreadLogger",
+            };
+            loggerThread.Start();
+        }
+
+        private static void ProcessMessages()
+        {
+            foreach (var message in Messages.GetConsumingEnumerable())
+            {
+                OnNext(message);
+            }
+
+            OnCompleted();
         }
 
         public static Task WaitForCompletion()
@@ -57,16 +70,47 @@ namespace Microsoft.SourceBrowser.Common
             completedTask.SetResult(null);
         }
 
+        private static void Enqueue(IMessage message)
+        {
+            try
+            {
+                Messages.Add(message);
+            }
+            catch (InvalidOperationException)
+            {
+                // Logging has been closed via Close(); drop the message.
+            }
+        }
+
         public static void Exception(Exception e, string message, bool isSevere = true)
         {
             var text = message + Environment.NewLine + e.ToString();
             Exception(text, isSevere);
         }
 
+        // When set, non-severe warnings (e.g. first-chance exception noise from MSBuild evaluation) are
+        // dropped from both the console and Errors.txt so the logs stay readable. Severe errors are
+        // always kept. Wired from the /noWarnings command-line switch.
+        public static bool SuppressWarnings { get; set; }
+
         public static void Exception(string message, bool isSevere = true)
         {
-            Write(message, isSevere ? ConsoleColor.Red : ConsoleColor.Yellow);
-            WriteToFile(message, ErrorLogFilePath);
+            if (isSevere)
+            {
+                Interlocked.Increment(ref errorCount);
+            }
+            else if (SuppressWarnings)
+            {
+                return;
+            }
+
+            // Tag the severity into the message text itself so it survives redirection: the console
+            // color (Red vs Yellow) is lost once output is captured to a file or CI log, leaving severe
+            // errors -- the ones that increment ErrorCount and drive HtmlGenerator's non-zero exit --
+            // indistinguishable from benign first-chance noise. The tag makes them greppable everywhere.
+            string tagged = (isSevere ? "[SEVERE] " : "[WARN] ") + message;
+            Write(tagged, isSevere ? ConsoleColor.Red : ConsoleColor.Yellow);
+            WriteToFile(tagged, ErrorLogFilePath);
         }
 
         public static void Message(string message)
@@ -77,7 +121,7 @@ namespace Microsoft.SourceBrowser.Common
         
         private static void WriteToFile(string message, string filePath)
         {
-            Messages.OnNext(new FileMessage(message, filePath));
+            Enqueue(new FileMessage(message, filePath));
         }
 
         private static void InnerWriteToFile(string message, string filePath)
@@ -94,7 +138,7 @@ namespace Microsoft.SourceBrowser.Common
 
         public static void Write(string message, ConsoleColor color = ConsoleColor.Gray)
         {
-            Messages.OnNext(new ConsoleMessage(message, color));
+            Enqueue(new ConsoleMessage(message, color));
         }
 
         private static void InnerWrite(string message, ConsoleColor color = ConsoleColor.Gray)
@@ -128,9 +172,19 @@ namespace Microsoft.SourceBrowser.Common
             set { messageLogFilePath = value.MustBeAbsolute(); }
         }
 
+        // Stop accepting new messages and block until the background thread has drained everything
+        // already queued. The logger thread is a background thread, so without this join a fast exit
+        // (notably argument-validation failures that return before any indexing work) would let the
+        // process terminate before the queued messages are ever written to the console or log files.
+        // See https://github.com/KirillOsenkov/SourceBrowser/issues/165.
         public static void Close()
         {
-            Messages.OnCompleted();
+            if (!Messages.IsAddingCompleted)
+            {
+                Messages.CompleteAdding();
+            }
+
+            loggerThread.Join();
         }
     }
 

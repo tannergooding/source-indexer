@@ -18,6 +18,19 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
             set { solutionDestinationFolder = value.MustBeAbsolute(); }
         }
 
+        /// <summary>
+        /// The finalized, servable website root that Pass2 (<see cref="SolutionFinalizer"/>) writes into.
+        /// This is deliberately a different folder than <see cref="SolutionDestinationFolder"/> (Pass1's raw,
+        /// per-assembly index), so that Pass1's output stays a pure, re-derivable artifact that Pass2 never
+        /// mutates in place -- Pass2 copies each assembly's Pass1 folder here before patching/finalizing it.
+        /// </summary>
+        private static string websiteDestinationFolder;
+        public static string WebsiteDestinationFolder
+        {
+            get { return websiteDestinationFolder; }
+            set { websiteDestinationFolder = value.MustBeAbsolute(); }
+        }
+
         public static string ProcessedAssemblies
         {
             get
@@ -37,12 +50,21 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
 
         public static string AssemblyPathsFile => Path.Combine(Microsoft.SourceBrowser.Common.Paths.BaseAppFolder, Constants.AssemblyPaths);
 
-        public static void PrepareDestinationFolder(bool forceOverwrite = false)
+        public static void PrepareDestinationFolder(bool forceOverwrite = false, bool incremental = false)
         {
             if (!Configuration.CreateFoldersOnDisk &&
                 !Configuration.WriteDocumentsToDisk &&
                 !Configuration.WriteProjectAuxiliaryFilesToDisk)
             {
+                return;
+            }
+
+            if (incremental)
+            {
+                // Incremental runs deliberately do not wipe the destination -- the whole point is to let
+                // Pass1 (via ProjectStaleness) and Pass2 detect which per-assembly output is still valid
+                // and reuse it. Just make sure the folder exists.
+                Directory.CreateDirectory(SolutionDestinationFolder);
                 return;
             }
 
@@ -159,9 +181,80 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
             return result.ToString();
         }
 
+        /// <summary>
+        /// Resolves a unique relative destination path per item, given each item's (possibly
+        /// colliding) logical relative path and a physical-identity key (e.g. <c>document.FilePath</c>).
+        /// Two items that share both the same relative path AND the same identity key are treated
+        /// as the genuine same shared/linked file surfaced more than once -- they keep the original,
+        /// un-suffixed path so today's single-render-wins behavior for legitimate shared files is
+        /// preserved. Items that share only the relative path but have distinct identity keys are a
+        /// real name collision (e.g. two unrelated "IEnumerable.cs" files landing in the same
+        /// logical folder) and get a deterministic suffix appended to the file name, ordered by
+        /// identity key so the assignment doesn't depend on parallel generation scheduling.
+        /// </summary>
+        /// <param name="relativePaths">The relative path computed for each item, e.g. via <see cref="GetRelativeFilePathInProject(Document)"/>.</param>
+        /// <param name="identityKeys">A key identifying the physical source of each item, e.g. <c>document.FilePath</c>.</param>
+        /// <returns>An array parallel to the inputs with a unique relative path per distinct identity.</returns>
+        public static string[] DisambiguateRelativePaths(IReadOnlyList<string> relativePaths, IReadOnlyList<string> identityKeys)
+        {
+            if (relativePaths.Count != identityKeys.Count)
+            {
+                throw new ArgumentException("relativePaths and identityKeys must have the same length");
+            }
+
+            var result = new string[relativePaths.Count];
+
+            var groupsByRelativePath = Enumerable.Range(0, relativePaths.Count)
+                .GroupBy(i => relativePaths[i], StringComparer.OrdinalIgnoreCase);
+
+            foreach (var group in groupsByRelativePath)
+            {
+                var groupsByIdentity = group
+                    .GroupBy(i => identityKeys[i], StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(g => g.Key, StringComparer.Ordinal)
+                    .ToArray();
+
+                for (int rank = 0; rank < groupsByIdentity.Length; rank++)
+                {
+                    var disambiguatedPath = rank == 0
+                        ? group.Key
+                        : AppendDisambiguatingSuffix(group.Key, rank + 1);
+
+                    foreach (var index in groupsByIdentity[rank])
+                    {
+                        result[index] = disambiguatedPath;
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        private static string AppendDisambiguatingSuffix(string relativePath, int occurrence)
+        {
+            var directory = Path.GetDirectoryName(relativePath);
+            var fileNameWithoutExtension = Path.GetFileNameWithoutExtension(relativePath);
+            var extension = Path.GetExtension(relativePath);
+            var disambiguatedFileName = fileNameWithoutExtension + "_" + occurrence + extension;
+            return string.IsNullOrEmpty(directory)
+                ? disambiguatedFileName
+                : Path.Combine(directory, disambiguatedFileName);
+        }
+
         public static string GetRelativeFilePathInProject(Document document)
         {
-            string result = Path.Combine(document.Folders
+            var folders = document.Folders;
+
+            if (folders.Count == 0 && document.FilePath != null && document is SourceGeneratedDocument)
+            {
+                var parts = document.FilePath.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 3) // Last 3 directories: generator assembly name, generator full class name, hint name
+                {
+                    folders = ["Generated", ..parts.Skip(parts.Length - 3).Take(2)];
+                }
+            }
+
+            string result = Path.Combine(folders
                 .Select(SanitizeFolder)
                 .ToArray());
 
@@ -177,7 +270,64 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
 
             result = Path.Combine(result, fileName);
 
-            return result;
+            return ShortenRelativePathIfNecessary(result);
+        }
+
+        // Windows' default path limit is 260, but the generated index is later re-rooted under a
+        // deeper prefix at deploy time -- e.g. Azure App Service extracts the zipDeploy package to
+        // C:\local\Temp\zipdeploy\extracted\ -- so a path that fit during generation can exceed the
+        // limit once extracted. Cap the per-project relative path well below that budget so the fully
+        // re-rooted "<extractionRoot>\<AssemblyName>\<relativePath>.html" stays under 248 characters.
+        private const int MaxRelativeFilePathLength = 140;
+
+        /// <summary>
+        /// Bounds the length of a per-project relative destination path so it survives being re-rooted
+        /// under a deeper deployment prefix without exceeding the Windows path limit. Paths at or below
+        /// the limit are returned unchanged, so the overwhelming majority of files -- and every URL and
+        /// Solution Explorer entry derived from them -- are unaffected. Over-long paths (in practice the
+        /// synthetic source-generated document paths, whose folder is a fully-qualified generator type
+        /// name) keep their original leaf file name and top-level folder for display, and have the
+        /// redundant middle collapsed into a short deterministic hash so links stay stable and unique.
+        /// </summary>
+        public static string ShortenRelativePathIfNecessary(string relativePath)
+        {
+            if (relativePath.Length <= MaxRelativeFilePathLength)
+            {
+                return relativePath;
+            }
+
+            var fileName = Path.GetFileName(relativePath);
+            var folder = Path.GetDirectoryName(relativePath);
+
+            // Collapse the folder portion -- in practice the redundant, fully-qualified source-generator
+            // type name -- into a short deterministic hash, keeping the top-level folder (e.g. "Generated")
+            // so the Solution Explorer grouping is preserved. Hashing the full folder keeps the result
+            // unique, so two distinct long folders can't map onto the same shortened path.
+            string prefix = string.Empty;
+            if (!string.IsNullOrEmpty(folder))
+            {
+                var hashedFolder = GetMD5Hash(folder, 16);
+                var separatorIndex = folder.IndexOf('\\');
+                prefix = separatorIndex > 0
+                    ? Path.Combine(folder.Substring(0, separatorIndex), hashedFolder)
+                    : hashedFolder;
+            }
+
+            // Keep the original file name where it fits so the displayed name and URL leaf stay accurate;
+            // only when the leaf alone would still bust the budget do we truncate it, retaining a readable
+            // prefix plus a hash of the original name to stay unique and stable.
+            var maxFileNameLength = MaxRelativeFilePathLength - prefix.Length - 1;
+            if (fileName.Length > maxFileNameLength)
+            {
+                var extension = Path.GetExtension(fileName);
+                var hash = GetMD5Hash(fileName, 16);
+                var stemBudget = maxFileNameLength - hash.Length - 1 - extension.Length;
+                var stem = Path.GetFileNameWithoutExtension(fileName);
+                stem = stemBudget > 0 ? stem.Substring(0, Math.Min(stem.Length, stemBudget)) : string.Empty;
+                fileName = stem + "_" + hash + extension;
+            }
+
+            return string.IsNullOrEmpty(prefix) ? fileName : Path.Combine(prefix, fileName);
         }
 
         private static char[] invalidFileChars = Path.GetInvalidFileNameChars();
@@ -270,22 +420,16 @@ namespace Microsoft.SourceBrowser.HtmlGenerator
 
         public static string GetMD5Hash(string input, int digits)
         {
-            using (var md5 = MD5.Create()) // lgtm [cs/weak-crypto] Not used for crypto
-            {
-                var bytes = Encoding.UTF8.GetBytes(input);
-                var hashBytes = md5.ComputeHash(bytes);
-                return Serialization.ByteArrayToHexString(hashBytes, digits);
-            }
+            var bytes = Encoding.UTF8.GetBytes(input);
+            var hashBytes = MD5.HashData(bytes);
+            return Serialization.ByteArrayToHexString(hashBytes, digits);
         }
 
         public static ulong GetMD5HashULong(string input, int digits)
         {
-            using (var md5 = MD5.Create()) // lgtm [cs/weak-crypto] Not used for crypto
-            {
-                var bytes = Encoding.UTF8.GetBytes(input);
-                var hashBytes = md5.ComputeHash(bytes);
-                return BitConverter.ToUInt64(hashBytes, 0);
-            }
+            var bytes = Encoding.UTF8.GetBytes(input);
+            var hashBytes = MD5.HashData(bytes);
+            return BitConverter.ToUInt64(hashBytes, 0);
         }
 
         public static string StripExtension(string fileName)

@@ -21,7 +21,7 @@ namespace Microsoft.SourceBrowser.SourceIndexServer.Models
             var clientId = Environment.GetEnvironmentVariable("AZURE_CLIENT_ID");
             credential = string.IsNullOrEmpty(clientId)
                             ? new AzureCliCredential()
-                            : new ManagedIdentityCredential(clientId);
+                            : new ManagedIdentityCredential(ManagedIdentityId.FromUserAssignedClientId(clientId));
 
             container = new BlobContainerClient(new Uri(uri),
                                                 credential);
@@ -41,7 +41,7 @@ namespace Microsoft.SourceBrowser.SourceIndexServer.Models
                 dirName += "/";
             }
 
-            return container.GetBlobsByHierarchy(prefix: dirName)
+            return container.GetBlobsByHierarchy(traits: BlobTraits.None, states: BlobStates.None, delimiter: null, prefix: dirName)
                 .Where(item => item.IsBlob)
                 .Select(item => item.Blob.Name)
                 .ToList();
